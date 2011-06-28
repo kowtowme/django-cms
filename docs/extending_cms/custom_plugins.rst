@@ -2,20 +2,23 @@
 Custom Plugins
 ##############
 
-CMS Plugins are used to give content managers the ability to add content to
-pages, in most cases, the builtin and 3rd party plugins are not enough, in
-which case you have to write your own custom CMS Plugin.
+Content managers are given the ability to add and extend the functionality of Django CMS through 
+existing, buitin or third party, plugins. Creating plugins are rather simple, but requires 
+existing knowledge of....
 
-Don't worry though, since writing a CMS Plugin is rather simple.
+
+With that in mind, writing a CMS Plugin is rather simple.
 
 
 ********
 Overview
 ********
 
-* A subclass of :class:`cms.plugin_base.CMSPluginBase`, usually placed in
-  ``cms_plugins.py`` defines your plugin.
-* A template to render the plugin.
+Generally, to create a plugin you would:
+
+* Define the plugin by subclassing :class:`cms.plugin_base.CMSPluginBase`. Convention is to place the subclass in
+  ``cms_plugins.py``.
+* Create a template to render the plugin.
 * *Optionally* use a subclass of :class:`cms.models.pluginmodel.CMSPlugin` to
   store the configuration for your plugin instances.
 
@@ -24,11 +27,10 @@ Overview
 The simplest plugin
 *******************
 
-You may use ``python manage.py startapp`` to set up the basic layout for you
-plugin app, alternatively, just add a file called ``cms_plugins.py`` to an
-existing Django application.
+As an example let's create a plugin that will greet users on a website either by their name if
+they're logged in, or as Guest if they're not.
 
-In there, you place your plugins, in our example the following code::
+In an existing project, add a module called ``cms_plugins.py`` and place the following code within:
 
     from cms.plugin_base import CMSPluginBase
     from cms.plugin_pool import plugin_pool
@@ -45,33 +47,18 @@ In there, you place your plugins, in our example the following code::
 
     plugin_pool.register_plugin(HelloPlugin)
 
-Now we're almost done, all that's left is adding the template. Add the
-following into the root template directory in a file called
-``hello_plugin.html``:
-
-.. code-block:: html+django
-
-    <h1>Hello {% if request.user.is_authenticated %}{{ request.user.first_name }} {{ request.user.last_name}}{% else %}Guest{% endif %}</h1>
-
-This plugin will now greet the users on your website either by their name if
-they're logged in, or as Guest if they're not.
-
-Now let's take a closer look at what we did there. The ``cms_plugins.py`` files
-are where you should define your subclasses of
-:class:`cms.plugin_base.CMSPluginBase`, these classes define the different
-plugins.
-
-There are three required attributes on those classes:
+Let's examine the class. It has three required attributes:
 
 * ``model``: The model you wish to use to store information about this plugin,
   if you do not require any special information, for example configuration, to
   be stored for your plugins, you may just use
-  :class:`cms.models.pluginmodel.CMSPlugin`. We'll look at that model more
+  :class:`cms.models.pluginmodel.CMSPlugin` instead. We'll look at that model more
   closely in a bit.
 * ``name``: The name of your plugin as displayed in the admin. It is generally
   good practice to mark this string as translatable using
-  :func:`django.utils.translation.ugettext_lazy`, however this is optional.
-* ``render_template``: The template to render this plugin with.
+  :func:`django.utils.translation.ugettext_lazy`, however marking it translatable is optional.
+* ``render_template``: The template to render this plugin with. In our case, it is a template 
+  we called hello_plugin.html that we have not created yet.
 
 In addition to those three attributes, you must also define a 
 :meth:`render` method on your subclasses. That method gets three arguments:
@@ -84,6 +71,96 @@ This method must return a dictionary or an instance of
 :class:`django.template.Context`, which will be used as context to render the
 plugin template.
 
+In order for Django CMS to detect the existence of HelloPlugin, it has to be registered with the plugin_pool manager as indicated in the last line of code.
+
+Next, let's add a template file named ``hello_plugin.html`` to the root template directory 
+with the following content:
+
+.. code-block:: html+django
+
+    <h1>Hello {% if request.user.is_authenticated %}{{ request.user.first_name }} {{ request.user.last_name}}{% else %}Guest{% endif %}</h1>
+
+This template simply checks if the current user is logged in, or not, and displays the corresponding message.
+
+... go ahead and try the plugin by....
+
+
+*********************
+Storing configuration
+*********************
+
+In many cases, you want to store configuration for your plugin instances. For
+example if you have a plugin that shows the latest blog posts, you might want
+to be able to choose the amount of entries shown. Another example would be a
+gallery plugin, where you want to choose the pictures to show.
+
+Let's improve our ``HelloPlugin`` from above by making it configurable with a
+fallback name for non authenticated users.
+
+To do so, we will store the data in a subclass of :class:`cms.models.pluginmodel.CMSPlugin` 
+in the ``models.py`` of the app.
+
+In the ``models.py`` add the following::
+
+    from cms.models.pluginmodel import CMSPlugin
+    
+    from django.db import models
+
+    class HelloModel(CMSPlugin):
+        guest_name = models.CharField(max_length=50, default='Guest')
+
+
+This is similar to how Django models are defined, and the only difference to normal models is 
+that you subclass :class:`cms.models.pluginmodel.CMSPlugin` rather than
+:class:`django.db.models.base.Model`. We then defined a field to hold the fallback name.
+
+Next we change the plugin definition to use this model, so our new
+``cms_plugins.py`` looks like this::
+
+    from cms.plugin_base import CMSPluginBase
+    from cms.plugin_pool import plugin_pool
+    from django.utils.translation import ugettext_lazy as _
+    
+    from models import Hello
+
+    class HelloPlugin(CMSPluginBase):
+        model = HelloModel
+        name = _("Hello Plugin")
+        render_template = "hello_plugin.html"
+
+        def render(self, context, instance, placeholder):
+            context['instance'] = instance
+            return context
+
+    plugin_pool.register_plugin(HelloPlugin)
+
+The only changes are the ``model`` attribute now points to the newly created ``HelloModel``
+model and pass the model instance to the context.
+
+As a last step, we have to update our template to make use of this
+new configuration:
+
+.. code-block:: html+django
+
+    <h1>Hello {% if request.user.is_authenticated %}{{ request.user.first_name }} {{ request.user.last_name}}{% else %}{{ instance.guest_name }}{% endif %}</h1>
+
+The only thing we changed there is that we use the template variable
+``{{ instance.guest_name }}`` instead of the hardcoded ``Guest`` string in the
+else clause.
+
+.. warning::
+
+    :class:`cms.models.pluginmodel.CMSPlugin` subclasses cannot be further
+    subclassed at the moment. In order to make your plugin models reusable,
+    please use abstract base models.
+
+.. warning::
+    
+    You cannot name your model fields the same as any installed plugins
+    lower-cased model name, due to the implicit one to one relation Django uses
+    for subclassed models. If you use all core plugins, this includes:
+    ``file``, ``flash``, ``googlemap``, ``link``, ``picture``, ``snippetptr``,
+    ``teaser``, ``twittersearch``, ``twitterrecententries`` and ``video``.
 
 
 *********************
